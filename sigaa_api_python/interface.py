@@ -5,6 +5,8 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from collections import deque
+import json
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -30,6 +32,10 @@ SESSION_TTL_SECONDS = int(os.environ.get("SIGAA_API_SESSION_TTL", "900"))
 CLEANUP_INTERVAL_SECONDS = 60
 _sessions: dict[str, dict] = {}
 _sessions_lock = asyncio.Lock()
+
+LOG_FILE = os.path.join(os.path.dirname(__file__), "api_requests.log")
+_active_requests = 0
+_active_requests_lock = asyncio.Lock()
 
 
 class ApiError(HTTPException):
@@ -128,6 +134,29 @@ async def delete_client(public_key_hex: str, _: str = Depends(verify_admin)):
         return {"status": "ok"}
     raise HTTPException(status_code=404, detail="Client not found")
 
+@app.get("/admin/logs")
+async def get_logs(_: str = Depends(verify_admin)):
+    global _active_requests
+    logs = []
+    if os.path.exists(LOG_FILE):
+        try:
+            with open(LOG_FILE, "r", encoding="utf-8") as f:
+                # Get the last 50 lines efficiently
+                last_lines = deque(f, maxlen=50)
+                for line in last_lines:
+                    if line.strip():
+                        logs.append(json.loads(line))
+        except Exception:
+            pass # Ignore read/decode errors
+    
+    # Reverse to show newest first
+    logs.reverse()
+    
+    return {
+        "active_requests": _active_requests,
+        "logs": logs
+    }
+
 API_PREFIX = "/api/v1/"
 
 
@@ -159,8 +188,56 @@ class SignedRequestMiddleware(BaseHTTPMiddleware):
         request.state.client_public_key = client_public_key.lower()
         return await call_next(request)
 
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        if not path.startswith(API_PREFIX):
+            return await call_next(request)
+            
+        global _active_requests
+        
+        async with _active_requests_lock:
+            _active_requests += 1
+            
+        start_time = time.time()
+        status_code = 500
+        
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        except Exception:
+            raise
+        finally:
+            duration_ms = int((time.time() - start_time) * 1000)
+            
+            async with _active_requests_lock:
+                _active_requests = max(0, _active_requests - 1)
+                
+            # Attempt to get the client from SignedRequestMiddleware state
+            client_key = getattr(request.state, "client_public_key", "Unknown")
+            
+            log_entry = {
+                "timestamp": int(time.time()),
+                "client": client_key,
+                "method": request.method,
+                "path": path,
+                "status": status_code,
+                "duration_ms": duration_ms
+            }
+            
+            # Fire and forget append to file
+            try:
+                with open(LOG_FILE, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_entry) + "\\n")
+            except Exception:
+                pass
 
+
+# Middleware execution goes from bottom to top (last added executes first).
+# We want Logging to start timing BEFORE SignedRequestMiddleware, and finish AFTER it.
 app.add_middleware(SignedRequestMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
 
 
 async def _get_owned_session(session_id: str, client_public_key: str) -> dict:

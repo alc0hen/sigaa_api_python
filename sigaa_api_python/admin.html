@@ -268,6 +268,73 @@
         }
         @keyframes spin { to { transform: rotate(360deg); } }
 
+        /* Tabs */
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+        .tab-btn {
+            background: transparent;
+            color: var(--text-muted);
+            border: none;
+            font-size: 1.1rem;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            border-radius: 8px;
+        }
+        .tab-btn:hover { color: var(--text-main); background: rgba(255,255,255,0.05); }
+        .tab-btn.active { color: var(--primary); font-weight: 600; background: rgba(79, 70, 229, 0.1); }
+
+        /* Logs Table */
+        .logs-stats {
+            display: flex;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            flex: 1;
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+        }
+        th, td {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        th { color: var(--text-muted); font-weight: 500; }
+        tr:hover { background: rgba(255,255,255,0.02); }
+        .method-badge {
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            background: rgba(255,255,255,0.1);
+        }
+        .status-badge {
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+        .status-ok { background: rgba(16, 185, 129, 0.1); color: var(--success); }
+        .status-err { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
     </style>
 </head>
 <body>
@@ -297,17 +364,59 @@
     <div id="dashboard-view" class="container">
         <header>
             <div class="header-title">
-                <h1>API Keys</h1>
-                <p>Manage access to the SIGAA API.</p>
+                <h1>SIGAA API</h1>
+                <p>Manage access and monitor live traffic.</p>
             </div>
             <div style="display: flex; gap: 1rem;">
-                <button id="btn-new-key" class="btn-primary">Generate New Key</button>
                 <button id="btn-logout" class="btn-danger" style="background:transparent; border-color:transparent;">Logout</button>
             </div>
         </header>
 
-        <div class="key-list" id="client-list">
-            <!-- Client items will be injected here -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('keys')">API Keys</button>
+            <button class="tab-btn" onclick="switchTab('logs')">Live Logs</button>
+        </div>
+
+        <!-- Keys Tab -->
+        <div id="tab-keys">
+            <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
+                <button id="btn-new-key" class="btn-primary">Generate New Key</button>
+            </div>
+            <div class="key-list" id="client-list">
+                <!-- Client items will be injected here -->
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="tab-logs" style="display: none;">
+            <div class="logs-stats">
+                <div class="glass-panel stat-card">
+                    <div class="stat-value" id="stat-active">0</div>
+                    <div style="color: var(--text-muted)">Active Sessions (Parallelism)</div>
+                </div>
+                <div class="glass-panel stat-card">
+                    <div class="stat-value" id="stat-avg-time">0ms</div>
+                    <div style="color: var(--text-muted)">Avg Response Time</div>
+                </div>
+            </div>
+
+            <div class="glass-panel table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Status</th>
+                            <th>Duration</th>
+                            <th>Client (Public Key)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="logs-table-body">
+                        <!-- Logs will be injected here -->
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
@@ -367,6 +476,9 @@
             document.getElementById('login-view').style.display = 'none';
             document.getElementById('dashboard-view').style.display = 'block';
             loadClients();
+            if (activeTab === 'logs') {
+                startLogsPolling();
+            }
         };
         const openModal = (id) => {
             const m = document.getElementById(id);
@@ -377,6 +489,26 @@
             const m = document.getElementById(id);
             m.classList.remove('active');
             setTimeout(() => m.style.display = 'none', 300);
+        };
+
+        let activeTab = 'keys';
+        let logsInterval = null;
+
+        window.switchTab = (tab) => {
+            activeTab = tab;
+            document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.classList.add('active');
+            
+            document.getElementById('tab-keys').style.display = tab === 'keys' ? 'block' : 'none';
+            document.getElementById('tab-logs').style.display = tab === 'logs' ? 'block' : 'none';
+
+            if (tab === 'logs') {
+                loadLogs();
+                startLogsPolling();
+            } else {
+                stopLogsPolling();
+                loadClients();
+            }
         };
 
         const formatDate = (timestamp) => {
@@ -433,6 +565,7 @@
         document.getElementById('btn-logout').addEventListener('click', () => {
             localStorage.removeItem('sigaa_admin_token');
             authToken = null;
+            stopLogsPolling();
             showLogin();
         });
 
@@ -467,6 +600,62 @@
                 list.innerHTML = html;
             } catch (e) {
                 // Handled in fetchApi
+            }
+        };
+
+        const loadLogs = async () => {
+            try {
+                const res = await fetchApi('/admin/logs');
+                const data = await res.json();
+                
+                document.getElementById('stat-active').textContent = data.active_requests;
+                
+                let sumTime = 0;
+                let html = '';
+                
+                if (data.logs.length === 0) {
+                    html = `<tr><td colspan="6" style="text-align:center; padding: 3rem; color: var(--text-muted);">No logs recorded yet.</td></tr>`;
+                    document.getElementById('stat-avg-time').textContent = '0ms';
+                } else {
+                    data.logs.forEach(log => {
+                        sumTime += log.duration_ms;
+                        const d = new Date(log.timestamp * 1000);
+                        const timeStr = d.toLocaleTimeString();
+                        
+                        const statusClass = log.status >= 200 && log.status < 400 ? 'status-ok' : 'status-err';
+                        const methodColor = log.method === 'GET' ? '#3b82f6' : log.method === 'POST' ? '#10b981' : log.method === 'DELETE' ? '#ef4444' : '#8b5cf6';
+                        
+                        html += `
+                            <tr>
+                                <td style="white-space: nowrap">${timeStr}</td>
+                                <td><span class="method-badge" style="color: ${methodColor}">${log.method}</span></td>
+                                <td><code style="color: var(--text-muted)">${log.path}</code></td>
+                                <td><span class="status-badge ${statusClass}">${log.status}</span></td>
+                                <td>${log.duration_ms} ms</td>
+                                <td><code style="font-size: 0.8rem">${log.client !== 'Unknown' ? log.client.substring(0, 16) + '...' : 'Unknown'}</code></td>
+                            </tr>
+                        `;
+                    });
+                    
+                    document.getElementById('stat-avg-time').textContent = Math.round(sumTime / data.logs.length) + 'ms';
+                }
+                
+                document.getElementById('logs-table-body').innerHTML = html;
+            } catch (e) {
+                // Handled in fetchApi
+            }
+        };
+
+        const startLogsPolling = () => {
+            if (!logsInterval) {
+                logsInterval = setInterval(loadLogs, 3000); // Poll every 3s
+            }
+        };
+
+        const stopLogsPolling = () => {
+            if (logsInterval) {
+                clearInterval(logsInterval);
+                logsInterval = null;
             }
         };
 
