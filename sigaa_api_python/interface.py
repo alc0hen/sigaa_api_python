@@ -6,10 +6,13 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, HTMLResponse
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from . import auth
 from .exceptions import (
@@ -68,6 +71,62 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="SIGAA API Interface", lifespan=lifespan)
+
+ADMIN_PASSWORD = os.environ.get("SIGAA_API_ADMIN_PASSWORD")
+if not ADMIN_PASSWORD:
+    raise ValueError("SIGAA_API_ADMIN_PASSWORD environment variable is required.")
+
+security = HTTPBearer()
+
+def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if credentials.credentials != ADMIN_PASSWORD:
+        raise HTTPException(status_code=401, detail="Invalid admin password")
+    return credentials.credentials
+
+class NewClientRequest(BaseModel):
+    name: str
+
+@app.get("/", response_class=HTMLResponse)
+async def admin_ui():
+    html_path = os.path.join(os.path.dirname(__file__), "admin.html")
+    try:
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "Admin UI not found."
+
+@app.get("/admin/clients")
+async def get_clients(_: str = Depends(verify_admin)):
+    return auth.list_clients()
+
+@app.post("/admin/clients")
+async def create_client(payload: NewClientRequest, _: str = Depends(verify_admin)):
+    private_key = Ed25519PrivateKey.generate()
+    public_key = private_key.public_key()
+    
+    private_hex = private_key.private_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PrivateFormat.Raw,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).hex()
+    public_hex = public_key.public_bytes(
+        encoding=serialization.Encoding.Raw,
+        format=serialization.PublicFormat.Raw,
+    ).hex()
+    
+    auth.register_client(public_hex, payload.name)
+    
+    return {
+        "public_key": public_hex,
+        "private_key": private_hex,
+        "name": payload.name
+    }
+
+@app.delete("/admin/clients/{public_key_hex}")
+async def delete_client(public_key_hex: str, _: str = Depends(verify_admin)):
+    if auth.revoke_client(public_key_hex):
+        return {"status": "ok"}
+    raise HTTPException(status_code=404, detail="Client not found")
 
 API_PREFIX = "/api/v1/"
 
