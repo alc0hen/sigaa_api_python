@@ -29,9 +29,12 @@ class LocalFileProvider(StorageProvider):
     def load(self):
         if not CLIENTS_FILE.exists():
             return {}
-        with CLIENTS_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {k.lower(): v for k, v in data.items()}
+        try:
+            with CLIENTS_FILE.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+            return {k.lower(): v for k, v in data.items()}
+        except json.JSONDecodeError:
+            return {}
 
     def save(self, keys):
         CLIENTS_FILE.write_text(json.dumps(keys, indent=2), encoding="utf-8")

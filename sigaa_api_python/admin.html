@@ -383,12 +383,7 @@
             return new Date(timestamp * 1000).toLocaleString();
         };
 
-        // Auth
-        if (authToken) {
-            showDashboard();
-        } else {
-            showLogin();
-        }
+        // Initialization moved to the bottom
 
         const fetchApi = async (url, options = {}) => {
             const headers = {
@@ -516,6 +511,13 @@
                 alert("Failed to revoke key.");
             }
         };
+
+        // Initialize App
+        if (authToken) {
+            showDashboard();
+        } else {
+            showLogin();
+        }
 
     </script>
 </body>
