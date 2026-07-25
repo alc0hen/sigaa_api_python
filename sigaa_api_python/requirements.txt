@@ -1,0 +1,8 @@
+aiohttp
+beautifulsoup4
+lxml
+fastapi
+hypercorn
+cryptography
+requests
+plotext
