@@ -58,8 +58,15 @@ class GitHubProvider(StorageProvider):
                 data = json.loads(response.read().decode())
                 content = base64.b64decode(data['content']).decode('utf-8')
                 self._sha = data['sha'] # Keep sha for updates
+                
+                # Handle empty or invalid JSON strings
+                if not content.strip():
+                    return {}
+                    
                 keys = json.loads(content)
                 return {k.lower(): v for k, v in keys.items()}
+        except json.JSONDecodeError:
+            return {}
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 self._sha = None
@@ -116,8 +123,13 @@ class GenericHttpProvider(StorageProvider):
         # Add custom headers if needed: req.add_header('Authorization', 'Bearer YOUR_TOKEN')
         try:
             with urllib.request.urlopen(req) as response:
-                keys = json.loads(response.read().decode())
+                content = response.read().decode('utf-8')
+                if not content.strip():
+                    return {}
+                keys = json.loads(content)
                 return {k.lower(): v for k, v in keys.items()}
+        except json.JSONDecodeError:
+            return {}
         except urllib.error.HTTPError as e:
             if e.code == 404:
                 return {}
