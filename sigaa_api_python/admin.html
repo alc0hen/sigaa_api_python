@@ -333,8 +333,23 @@
             font-size: 0.8rem;
             font-weight: 600;
         }
-        .status-ok { background: rgba(16, 185, 129, 0.1); color: var(--success); }
-        .status-err { background: rgba(239, 68, 68, 0.1); color: var(--danger); }
+        /* Console Table */
+        .console-container {
+            background: #0f172a;
+            border-radius: 8px;
+            padding: 1rem;
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+        }
+        .console-text {
+            color: #10b981;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            margin: 0;
+            line-height: 1.4;
+        }
     </style>
 </head>
 <body>
@@ -375,6 +390,7 @@
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('keys')">API Keys</button>
             <button class="tab-btn" onclick="switchTab('logs')">Live Logs</button>
+            <button class="tab-btn" onclick="switchTab('console')">Console (Detailed Logs)</button>
         </div>
 
         <!-- Keys Tab -->
@@ -416,6 +432,13 @@
                         <!-- Logs will be injected here -->
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <!-- Console Tab -->
+        <div id="tab-console" style="display: none;">
+            <div class="console-container" id="console-scroll">
+                <pre class="console-text" id="console-output">Loading system logs...</pre>
             </div>
         </div>
     </div>
@@ -493,6 +516,7 @@
 
         let activeTab = 'keys';
         let logsInterval = null;
+        let consoleInterval = null;
 
         window.switchTab = (tab) => {
             activeTab = tab;
@@ -501,12 +525,19 @@
             
             document.getElementById('tab-keys').style.display = tab === 'keys' ? 'block' : 'none';
             document.getElementById('tab-logs').style.display = tab === 'logs' ? 'block' : 'none';
+            document.getElementById('tab-console').style.display = tab === 'console' ? 'block' : 'none';
 
             if (tab === 'logs') {
+                stopConsolePolling();
                 loadLogs();
                 startLogsPolling();
+            } else if (tab === 'console') {
+                stopLogsPolling();
+                loadConsole();
+                startConsolePolling();
             } else {
                 stopLogsPolling();
+                stopConsolePolling();
                 loadClients();
             }
         };
@@ -656,6 +687,37 @@
             if (logsInterval) {
                 clearInterval(logsInterval);
                 logsInterval = null;
+            }
+        };
+
+        const loadConsole = async () => {
+            try {
+                const res = await fetchApi('/admin/console');
+                const data = await res.json();
+                const out = document.getElementById('console-output');
+                const scroll = document.getElementById('console-scroll');
+                
+                // Only auto-scroll if user is already at the bottom
+                const isScrolledToBottom = scroll.scrollHeight - scroll.clientHeight <= scroll.scrollTop + 50;
+                
+                out.textContent = data.logs || "No system logs found.";
+                
+                if (isScrolledToBottom) {
+                    scroll.scrollTop = scroll.scrollHeight;
+                }
+            } catch (e) {}
+        };
+
+        const startConsolePolling = () => {
+            if (!consoleInterval) {
+                consoleInterval = setInterval(loadConsole, 2000); // Poll every 2s
+            }
+        };
+
+        const stopConsolePolling = () => {
+            if (consoleInterval) {
+                clearInterval(consoleInterval);
+                consoleInterval = null;
             }
         };
 

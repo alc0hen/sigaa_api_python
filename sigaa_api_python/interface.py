@@ -34,8 +34,16 @@ _sessions: dict[str, dict] = {}
 _sessions_lock = asyncio.Lock()
 
 LOG_FILE = os.path.join(os.path.dirname(__file__), "api_requests.log")
+SYSTEM_LOG_FILE = os.path.join(os.path.dirname(__file__), "system.log")
 _active_requests = 0
 _active_requests_lock = asyncio.Lock()
+
+# Configure root logger to output to system.log
+file_handler = logging.FileHandler(SYSTEM_LOG_FILE, mode='a', encoding='utf-8')
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+logging.getLogger().addHandler(file_handler)
+# Set root level to INFO to capture our sigaa logs
+logging.getLogger().setLevel(logging.INFO)
 
 
 class ApiError(HTTPException):
@@ -141,21 +149,31 @@ async def get_logs(_: str = Depends(verify_admin)):
     if os.path.exists(LOG_FILE):
         try:
             with open(LOG_FILE, "r", encoding="utf-8") as f:
-                # Get the last 50 lines efficiently
                 last_lines = deque(f, maxlen=50)
                 for line in last_lines:
                     if line.strip():
                         logs.append(json.loads(line))
         except Exception:
-            pass # Ignore read/decode errors
+            pass
     
-    # Reverse to show newest first
     logs.reverse()
-    
     return {
         "active_requests": _active_requests,
         "logs": logs
     }
+
+@app.get("/admin/console")
+async def get_console(_: str = Depends(verify_admin)):
+    lines = []
+    if os.path.exists(SYSTEM_LOG_FILE):
+        try:
+            with open(SYSTEM_LOG_FILE, "r", encoding="utf-8") as f:
+                last_lines = deque(f, maxlen=200)
+                lines = list(last_lines)
+        except Exception:
+            lines = ["Error reading system log."]
+    
+    return {"logs": "".join(lines)}
 
 API_PREFIX = "/api/v1/"
 
