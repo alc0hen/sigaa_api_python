@@ -40,7 +40,7 @@ class Course:
             self.grades = self._parse_grades(grades_page)
             current_page = grades_page
         except Exception as e:
-            logger.error(f"Error parsing grades for {self.title}: {e}", exc_info=True)
+            logger.warning(f"Could not parse grades for {self.title}: {e}")
             self.grades = []
             
         try:
@@ -48,7 +48,7 @@ class Course:
             self.frequency = self._parse_frequency(freq_page)
             current_page = freq_page
         except Exception as e:
-            logger.error(f"Error parsing frequency for {self.title}: {e}", exc_info=True)
+            logger.warning(f"Could not parse frequency for {self.title}: {e}")
             # Fallback if chaining failed
             try:
                 course_page = await self._enter_course()

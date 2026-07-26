@@ -137,16 +137,25 @@ class StudentBond:
             active_course_titles = {c.title for c in active_courses}
             logger.info(f"SIGAA: Found {len(active_course_titles)} active courses to exclude from history.")
             
+            # Extract actual current semester
+            actual_current_semester = None
+            if page and hasattr(page, 'body') and page.body:
+                import re
+                actual_semester_match = re.search(r'Semestre atual:\s*<strong[^>]*>(\d{4}\.\d)</strong>', page.body)
+                if actual_semester_match:
+                    actual_current_semester = actual_semester_match.group(1)
+                    logger.info(f"SIGAA: Extracted actual current semester: {actual_current_semester}")
+
             logger.info("SIGAA: Navigating to Turmas Anteriores: /sigaa/portais/discente/turmas.jsf")
             turmas_page = await self.session.get('/sigaa/portais/discente/turmas.jsf')
             
             logger.info("SIGAA: Successfully loaded turmas.jsf, proceeding to parse classes.")
-            return await self._parse_previous_classes(turmas_page, cached_history, credentials, active_course_titles)
+            return await self._parse_previous_classes(turmas_page, cached_history, credentials, active_course_titles, actual_current_semester)
         except Exception as e:
             logger.error(f"Get history error: {e}")
             return {}
 
-    async def _parse_previous_classes(self, page, cached_history=None, credentials=None, active_course_titles=None):
+    async def _parse_previous_classes(self, page, cached_history=None, credentials=None, active_course_titles=None, actual_current_semester=None):
         history = {}
         classes_to_fetch = []
         try:
@@ -206,13 +215,21 @@ class StudentBond:
                          if 'APROVADO' in t_upper or 'REPROVADO' in t_upper or 'TRANCADO' in t_upper or 'MATRICULADO' in t_upper or 'DISPENSADO' in t_upper or 'CANCELADO' in t_upper:
                              row_status = t.title()
                              
+                     # Diagnostic log — shows exactly what SIGAA returns for each row
                      logger.info(f"SIGAA: Row '{title}' [{current_semester}] → row_status={row_status!r}")
 
+                     # Bug fix: skip entire actual_current_semester to avoid treating it as history
+                     if actual_current_semester and current_semester == actual_current_semester:
+                         logger.info(f"SIGAA: Skipping '{title}' — it belongs to the actual current semester ({actual_current_semester}).")
+                         continue
+
+                     # Bug fix: skip current semester disciplines if explicitly marked.
                      CURRENT_STATUSES = {'matriculado', 'cursando', 'em andamento', 'em curso', 'em progresso', 'ativo'}
                      if row_status and row_status.strip().lower() in CURRENT_STATUSES:
                          logger.info(f"SIGAA: Skipping '{title}' ({row_status!r}) — detected as current-semester, not history.")
                          continue
                          
+                     # Deduplicate: if this class is currently active and it's the latest semester, it's not history!
                      if active_course_titles and title in active_course_titles and current_semester == latest_semester:
                          logger.info(f"SIGAA: Skipping '{title}' in {current_semester} — it is an active course.")
                          continue
@@ -220,10 +237,12 @@ class StudentBond:
                      if row_status is None:
                          row_status = "Concluído"
                              
+                     # Check if we can reuse cached details
                      can_reuse = False
                      if cached_history and current_semester in cached_history:
                          for c_subj in cached_history[current_semester]:
                              if c_subj.get('name') == title:
+                                 # If the class has a final status, it won't change, we can reuse
                                  if row_status not in ['Matriculado', 'Cursando', 'Indefinido']:
                                      if current_semester not in history:
                                          history[current_semester] = []
@@ -276,6 +295,7 @@ class StudentBond:
                                     "name": c_info['title'], "final_grade": 0.0, "absences": 0, "status": c_info['row_status'], "grades": [], "professor": "Desconhecido"
                                 })
                         else:
+                            # result is a list of (c_info, subject_data_or_exception) tuples
                             for c_info, subj_result in result:
                                 sem = c_info['semester']
                                 if sem not in history:
@@ -308,7 +328,15 @@ class StudentBond:
         return history
 
     async def _fetch_batch_parallel(self, credentials, batch):
-
+        """Fetch multiple classes using a single authenticated session.
+        
+        Logs in once and processes each class sequentially within the same
+        JSF session. This is safe because requests are sequential per session,
+        so the ViewState is never corrupted. Between classes, we re-navigate
+        to turmas.jsf to get a fresh ViewState.
+        
+        Returns a list of (class_info, result_or_exception) tuples.
+        """
         from .sigaa import Sigaa
         username = credentials['username']
         password = credentials['password']
@@ -319,7 +347,7 @@ class StudentBond:
         sigaa = Sigaa(url, inst_type)
         results = []
         try:
-            logger.info(f"Worker (login temporario para paralelismo): Logging in for batch {titles}...")
+            logger.info(f"Worker: Logging in for batch {titles}...")
             await sigaa.login(username, password)
             if self.switch_url:
                 await sigaa.session.get(self.switch_url)
@@ -376,7 +404,6 @@ class StudentBond:
                     logger.error(f"Worker: Failed to fetch '{class_info['title']}' in batch: {e}")
                     results.append((class_info, e))
         finally:
-            logger.info(f"Worker (login temporario para paralelismo): Fechando sessão paralela para o lote {titles}.")
             await sigaa.close()
         
         return results
@@ -528,14 +555,19 @@ class StudentBond:
             logger.error(f"Parse bulletin error: {e}")
         return history
     async def get_enrollment_disciplines(self):
-
+        """
+        Navigates to the enrollment section and returns available classes / disciplines,
+        along with the current ViewState.
+        """
         from .enrollment_parser import parse_enrollment_page
 
+        # 1. Access portal discente
         if self.switch_url:
             page = await self.session.get(self.switch_url)
         else:
             page = await self.session.get('/sigaa/portais/discente/discente.jsf')
 
+        # 2. Extract JSCookMenu action for Realizar Matrícula
         action, form_id = self._extract_enrollment_action(page)
         if not action:
             raise ValueError("SIGAA: Realizar Matrícula menu action not found.")
@@ -552,8 +584,10 @@ class StudentBond:
         if form_el and form_el.get('action'):
             action_url = urljoin(str(page.url), form_el.get('action'))
 
+        # 3. Post to go to Instructions Page
         instrucoes_page = await self.session.post(action_url, data=post_values)
 
+        # 4. Handle Instructions Form and click "Iniciar seleção de turmas"
         form_el = instrucoes_page.soup.find('form', id='form')
         if not form_el:
             form_el = instrucoes_page.soup.find('form')
@@ -563,6 +597,7 @@ class StudentBond:
         form_id = form_el.get('id', 'form')
         post_values = {form_id: form_id}
 
+        # Auto-concordar: check all checkboxes inside the form (especially concordancia)
         for inp in form_el.find_all('input'):
             name = inp.get('name')
             val = inp.get('value', '')
@@ -572,10 +607,12 @@ class StudentBond:
             if itype == 'submit':
                 continue
             if itype == 'checkbox':
+                # Check it to be safe
                 post_values[name] = 'on'
                 continue
             post_values[name] = val
 
+        # Add the submit button key
         btn = form_el.find('input', id=re.compile(r'btnIniciarSolicit'))
         if btn:
             btn_name = btn.get('name', 'form:btnIniciarSolicit')
@@ -589,8 +626,10 @@ class StudentBond:
         action = form_el.get('action', '/sigaa/graduacao/matricula/instrucoes/instrucoes_regular.jsf')
         action_url = urljoin(str(instrucoes_page.url), action)
 
+        # 5. Post to go to Classes Selection Page
         selecao_page = await self.session.post(action_url, data=post_values)
 
+        # 6. Parse classes
         levels = parse_enrollment_page(selecao_page.body)
         return {
             "levels": levels,
