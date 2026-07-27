@@ -1,7 +1,7 @@
 import os
 import aiohttp
 import asyncio
-from .enums import HTTPMethod
+from .types import HTTPMethod
 from .page import SigaaPage
 from .exceptions import SigaaConnectionError, SigaaQuestionnaireError
 from urllib.parse import urljoin, urlparse
@@ -16,7 +16,6 @@ def _same_origin(url, base_origin: tuple) -> bool:
     scheme, netloc = _origin(url)
     if netloc != base_origin[1]:
         return False
-    # Permite subir para HTTPS, nunca descer para HTTP.
     if base_origin[0] == 'https' and scheme != 'https':
         return False
     return True
@@ -82,7 +81,8 @@ class SigaaSession:
 
             if not _same_origin(url, base_origin):
                 req_netloc = urlparse(url).netloc
-                raise ValueError(f"Security Alert: Potential SSRF attempt blocked. Request to {req_netloc} not allowed.")
+                raise ValueError(
+                    f"Security Alert: Potential SSRF attempt blocked. Request to {req_netloc} not allowed.")
 
             # Construct request-specific headers with Referer
             req_headers = self.headers.copy()
@@ -90,19 +90,22 @@ class SigaaSession:
                 req_headers['Referer'] = self.last_url
             if 'headers' in kwargs:
                 req_headers.update(kwargs['headers'])
-            
+
             # Pass req_headers to kwargs
             request_kwargs = kwargs.copy()
             request_kwargs['headers'] = req_headers
 
             try:
-                async with session.request(current_method, url, data=current_data, json=current_json, **request_kwargs) as response:
+                async with session.request(current_method, url, data=current_data, json=current_json,
+                                           **request_kwargs) as response:
+                    # Handle Redirects Manually
                     if response.status in (301, 302, 303, 307, 308):
                         if current_redirect_count >= 10:
                             raise SigaaConnectionError("Too many redirects")
 
                         location = response.headers.get('Location')
                         if not location:
+                            # Treat as final response if location is missing
                             body = await response.text()
                             self.last_url = str(response.url)
                             page = SigaaPage(
@@ -114,12 +117,14 @@ class SigaaSession:
                                 request_headers=dict(response.request_info.headers)
                             )
                             break
-                        
+
                         new_url = urljoin(str(response.url), location)
 
+                        # Validate Redirect Target Domain
                         if not _same_origin(new_url, base_origin):
                             new_netloc = urlparse(new_url).netloc
-                            raise ValueError(f"Security Alert: External redirect blocked. Redirect to {new_netloc} not allowed.")
+                            raise ValueError(
+                                f"Security Alert: External redirect blocked. Redirect to {new_netloc} not allowed.")
 
                         # Determine method for next request
                         next_method = current_method
@@ -134,9 +139,11 @@ class SigaaSession:
                         current_redirect_count += 1
                         continue
 
+                    # Process Final Response
                     if not _same_origin(response.url, base_origin):
                         final_netloc = urlparse(str(response.url)).netloc
-                        raise ValueError(f"Security Alert: External redirect blocked. Redirect to {final_netloc} not allowed.")
+                        raise ValueError(
+                            f"Security Alert: External redirect blocked. Redirect to {final_netloc} not allowed.")
 
                     body = await response.text()
                     self.last_url = str(response.url)
@@ -154,19 +161,24 @@ class SigaaSession:
                             return page
                         await self._handle_questionnaire(page)
                         # Retry the ORIGINAL request (resetting redirect count)
-                        return await self.request(method, path, data=data, json=json, retry_count=retry_count+1, **kwargs)
+                        return await self.request(method, path, data=data, json=json, retry_count=retry_count + 1,
+                                                  **kwargs)
 
                     return page
 
             except aiohttp.ServerDisconnectedError as e:
                 if retry_count < 3:
                     await asyncio.sleep(1.5)
-                    return await self.request(method, path, data=data, json=json, retry_count=retry_count+1, redirect_count=redirect_count, **kwargs)
+                    return await self.request(method, path, data=data, json=json, retry_count=retry_count + 1,
+                                              redirect_count=redirect_count, **kwargs)
                 raise SigaaConnectionError(f"Connection error: {e}")
             except aiohttp.ClientError as e:
                 raise SigaaConnectionError(f"Connection error: {e}")
 
     async def _handle_questionnaire(self, page):
+        """
+        Submits the form to skip the questionnaire.
+        """
         skip_button = page.soup.find(id='btnNaoResponderContinuarSigaa')
         if not skip_button:
             return
@@ -194,7 +206,7 @@ class SigaaSession:
 
         session = await self._get_session()
         async with session.post(action_url, data=post_values, allow_redirects=False) as resp:
-             await resp.text()
+            await resp.text()
 
     async def get(self, path, **kwargs):
         return await self.request(HTTPMethod.GET.value, path, **kwargs)
