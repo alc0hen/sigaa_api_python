@@ -155,17 +155,37 @@ def _get_provider():
 
 _storage_provider = None
 
-def _load_authorized_keys():
-    global _storage_provider
+_KEYS_CACHE_TTL = float(os.environ.get("SIGAA_API_KEYS_CACHE_TTL", "15"))
+_keys_cache = None
+_keys_cache_at = 0.0
+
+
+def _load_authorized_keys(force: bool = False):
+    global _storage_provider, _keys_cache, _keys_cache_at
     if _storage_provider is None:
         _storage_provider = _get_provider()
-    return _storage_provider.load()
+
+    now = time.monotonic()
+    if not force and _keys_cache is not None and (now - _keys_cache_at) < _KEYS_CACHE_TTL:
+        return _keys_cache
+
+    _keys_cache = _storage_provider.load()
+    _keys_cache_at = now
+    return _keys_cache
+
+
+def _invalidate_keys_cache():
+    global _keys_cache, _keys_cache_at
+    _keys_cache = None
+    _keys_cache_at = 0.0
+
 
 def _save_authorized_keys(keys):
     global _storage_provider
     if _storage_provider is None:
         _storage_provider = _get_provider()
     _storage_provider.save(keys)
+    _invalidate_keys_cache()
 
 
 def is_authorized(public_key_hex):

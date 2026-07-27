@@ -3,6 +3,7 @@ import asyncio
 import logging
 import os
 import time
+import hmac
 import uuid
 from contextlib import asynccontextmanager
 from collections import deque
@@ -93,7 +94,7 @@ if not ADMIN_PASSWORD:
 security = HTTPBearer()
 
 def verify_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if credentials.credentials != ADMIN_PASSWORD:
+    if not hmac.compare_digest(credentials.credentials or "", ADMIN_PASSWORD):
         raise HTTPException(status_code=401, detail="Invalid admin password")
     return credentials.credentials
 
@@ -190,6 +191,9 @@ class SignedRequestMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_public_key = path[len(API_PREFIX):].split("/", 1)[0]
+        signed_path = path
+        if request.url.query:
+            signed_path = f"{path}?{request.url.query}"
         body = await request.body()
         try:
             auth.verify_request(
@@ -197,7 +201,7 @@ class SignedRequestMiddleware(BaseHTTPMiddleware):
                 signature_hex=request.headers.get("X-Signature"),
                 timestamp=request.headers.get("X-Timestamp"),
                 method=request.method,
-                path=path,
+                path=signed_path,
                 body=body,
             )
         except auth.ClientAuthError as e:

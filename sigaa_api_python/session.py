@@ -6,6 +6,22 @@ from .page import SigaaPage
 from .exceptions import SigaaConnectionError, SigaaQuestionnaireError
 from urllib.parse import urljoin, urlparse
 
+
+def _origin(url) -> tuple:
+    parsed = urlparse(str(url))
+    return (parsed.scheme.lower(), parsed.netloc.lower())
+
+
+def _same_origin(url, base_origin: tuple) -> bool:
+    scheme, netloc = _origin(url)
+    if netloc != base_origin[1]:
+        return False
+    # Permite subir para HTTPS, nunca descer para HTTP.
+    if base_origin[0] == 'https' and scheme != 'https':
+        return False
+    return True
+
+
 class SigaaSession:
     def __init__(self, url, cookies=None):
         self.base_url = url
@@ -61,10 +77,11 @@ class SigaaSession:
             else:
                 url = urljoin(self.base_url, current_path)
 
-            base_netloc = urlparse(self.base_url).netloc
-            req_netloc = urlparse(url).netloc
+            base_origin = _origin(self.base_url)
+            base_netloc = base_origin[1]
 
-            if req_netloc != base_netloc:
+            if not _same_origin(url, base_origin):
+                req_netloc = urlparse(url).netloc
                 raise ValueError(f"Security Alert: Potential SSRF attempt blocked. Request to {req_netloc} not allowed.")
 
             # Construct request-specific headers with Referer
@@ -100,8 +117,8 @@ class SigaaSession:
                         
                         new_url = urljoin(str(response.url), location)
 
-                        new_netloc = urlparse(new_url).netloc
-                        if new_netloc != base_netloc:
+                        if not _same_origin(new_url, base_origin):
+                            new_netloc = urlparse(new_url).netloc
                             raise ValueError(f"Security Alert: External redirect blocked. Redirect to {new_netloc} not allowed.")
 
                         # Determine method for next request
@@ -117,8 +134,8 @@ class SigaaSession:
                         current_redirect_count += 1
                         continue
 
-                    final_netloc = urlparse(str(response.url)).netloc
-                    if final_netloc != base_netloc:
+                    if not _same_origin(response.url, base_origin):
+                        final_netloc = urlparse(str(response.url)).netloc
                         raise ValueError(f"Security Alert: External redirect blocked. Redirect to {final_netloc} not allowed.")
 
                     body = await response.text()
@@ -162,10 +179,8 @@ class SigaaSession:
             return
 
         action_url = urljoin(str(page.url), action)
-        base_netloc = urlparse(self.base_url).netloc
-        action_netloc = urlparse(action_url).netloc
 
-        if action_netloc != base_netloc:
+        if not _same_origin(action_url, _origin(self.base_url)):
             return
 
         view_state = page.view_state
