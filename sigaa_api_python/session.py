@@ -1,7 +1,7 @@
 import os
 import aiohttp
 import asyncio
-from .types import HTTPMethod
+from .enums import HTTPMethod
 from .page import SigaaPage
 from .exceptions import SigaaConnectionError, SigaaQuestionnaireError
 from urllib.parse import urljoin, urlparse

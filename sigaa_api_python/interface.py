@@ -8,6 +8,9 @@ import uuid
 from contextlib import asynccontextmanager
 from collections import deque
 import json
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -89,7 +92,8 @@ app = FastAPI(title="SIGAA API Interface", lifespan=lifespan)
 
 ADMIN_PASSWORD = os.environ.get("SIGAA_API_ADMIN_PASSWORD")
 if not ADMIN_PASSWORD:
-    raise ValueError("SIGAA_API_ADMIN_PASSWORD environment variable is required.")
+    logger.warning("SIGAA_API_ADMIN_PASSWORD environment variable is not set. Using default 'admin' password for development.")
+    ADMIN_PASSWORD = "admin"
 
 security = HTTPBearer()
 
