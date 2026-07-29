@@ -6,3 +6,4 @@ hypercorn
 cryptography
 requests
 plotext
+python-dotenv
