@@ -4,7 +4,9 @@ from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from .enums import HTTPMethod
 from .exceptions import SigaaSessionExpired
+
 class SigaaPage:
+
     def __init__(self, url, body, headers, method, status_code, request_headers=None):
         self.url = url
         self.body = body
@@ -15,11 +17,13 @@ class SigaaPage:
         self._soup = None
         self._view_state = None
         self.check_session_expired()
+
     @property
     def soup(self):
         if self._soup is None:
             self._soup = BeautifulSoup(self.body, 'lxml')
         return self._soup
+
     @property
     def view_state(self):
         if self._view_state is None:
@@ -27,21 +31,19 @@ class SigaaPage:
             if input_el:
                 self._view_state = input_el.get('value')
         return self._view_state
+
     def check_session_expired(self):
         if self.status_code == 302:
             location = self.headers.get('location') or self.headers.get('Location')
             if location and '/sigaa/expirada.jsp' in location:
-                raise SigaaSessionExpired("SIGAA: Session expired.")
+                raise SigaaSessionExpired('SIGAA: Session expired.')
         if '/sigaa/expirada.jsp' in str(self.url):
-             raise SigaaSessionExpired("SIGAA: Session expired.")
+            raise SigaaSessionExpired('SIGAA: Session expired.')
+
     def parse_jsfcljs(self, javascript_code):
-        """
-        Extracts form action and values from JSFCLJS javascript call.
-        Replicates logic from SigaaPageIFSC.ts
-        """
         if 'getElementById' not in javascript_code:
             raise ValueError('SIGAA: Form not found in JS code.')
-        form_query = re.search(r"document\.getElementById\('([^']+)'\)", javascript_code)
+        form_query = re.search("document\\.getElementById\\('([^']+)'\\)", javascript_code)
         if not form_query:
             raise ValueError('SIGAA: Form without id in JS code.')
         form_id = form_query.group(1)
@@ -60,9 +62,9 @@ class SigaaPage:
             value = input_el.get('value')
             if name is not None:
                 post_values[name] = value
-        match = re.search(r",\s*\{(.*?)\}\s*,", javascript_code)
+        match = re.search(',\\s*\\{(.*?)\\}\\s*,', javascript_code)
         if match:
-            json_str = "{" + match.group(1) + "}"
+            json_str = '{' + match.group(1) + '}'
             py_str = json_str.replace('true', 'True').replace('false', 'False').replace('null', 'None')
             try:
                 import ast
@@ -71,7 +73,4 @@ class SigaaPage:
                     post_values.update(extra_values)
             except (ValueError, SyntaxError):
                 pass
-        return {
-            'action': action,
-            'post_values': post_values
-        }
+        return {'action': action, 'post_values': post_values}

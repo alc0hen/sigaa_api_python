@@ -1,7 +1,5 @@
 import re
-
-_GROUP_RE = re.compile(r'\d[MTN]\d+', re.IGNORECASE)
-
+_GROUP_RE = re.compile('\\d[MTN]\\d+', re.IGNORECASE)
 
 def parse_schedule_code(code: str) -> int:
     if not code:
