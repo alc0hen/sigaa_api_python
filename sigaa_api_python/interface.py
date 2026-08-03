@@ -35,11 +35,18 @@ WORKER_QUEUE = f'sigaa:worker:{WORKER_ID}:tasks'
 HEARTBEAT_KEY = f'sigaa:worker:{WORKER_ID}:heartbeat'
 
 # ─── Logging ──────────────────────────────────────────────────────────────────
-
+import sys
 SYSTEM_LOG_FILE = os.path.join(os.path.dirname(__file__), 'system.log')
+formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
 file_handler = logging.FileHandler(SYSTEM_LOG_FILE, mode='a', encoding='utf-8')
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+file_handler.setFormatter(formatter)
 logging.getLogger().addHandler(file_handler)
+
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(formatter)
+logging.getLogger().addHandler(stream_handler)
+
 logging.getLogger().setLevel(logging.INFO)
 
 # ─── State ────────────────────────────────────────────────────────────────────
@@ -425,6 +432,15 @@ async def _heartbeat_loop():
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global _redis
+
+    bridge_task = None
+    if WS_URL:
+        bridge_task = asyncio.create_task(_start_redis_bridge())
+        # Dar um pequeno delay para a ponte TCP iniciar
+        await asyncio.sleep(1)
+    else:
+        logger.info('WS_URL not set — Redis bridge disabled (using direct Redis connection)')
+
     _redis = aioredis.from_url(REDIS_URL, decode_responses=True)
 
     # Spawn pool of concurrent workers
@@ -442,6 +458,8 @@ async def lifespan(_app: FastAPI):
             t.cancel()
         cleanup_task.cancel()
         heartbeat_task.cancel()
+        if bridge_task:
+            bridge_task.cancel()
 
         # Close all active sessions gracefully
         async with _sessions_lock:
@@ -521,10 +539,6 @@ async def _run():
     from hypercorn.config import Config
     config = Config()
     config.bind = [os.environ.get('SIGAA_API_BIND', '0.0.0.0:8000')]
-    if WS_URL:
-        asyncio.create_task(_start_redis_bridge())
-    else:
-        logger.info('WS_URL not set — Redis bridge disabled (using direct Redis connection)')
     await serve(app, config)
 
 
