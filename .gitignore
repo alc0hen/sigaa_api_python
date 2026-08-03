@@ -2,3 +2,4 @@ sigaa_api_python/example_client_dev.py
 /paginas_sigaa
 .idea
 .venv
+*.log
