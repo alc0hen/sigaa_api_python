@@ -1,5 +1,5 @@
 aiohttp
-beautifulsoup4
+selectolax==0.4.11
 lxml
 fastapi
 hypercorn
@@ -7,3 +7,5 @@ cryptography
 requests
 plotext
 python-dotenv
+redis[hiredis]
+websockets
