@@ -302,9 +302,16 @@ async def _worker_loop():
                 WORKER_ID, WORKER_QUEUE, SHARED_QUEUE)
     while True:
         try:
-            # Priority: worker-specific queue first, then shared queue
-            result = await _redis.brpop([WORKER_QUEUE, SHARED_QUEUE], timeout=5)
+            # Polling inteligente com RPOP para evitar TimeoutError na ponte WebSocket
+            result = None
+            for queue in [WORKER_QUEUE, SHARED_QUEUE]:
+                raw_task = await _redis.rpop(queue)
+                if raw_task:
+                    result = (queue, raw_task)
+                    break
+
             if result is None:
+                await asyncio.sleep(0.5)
                 continue
 
             _queue_name, raw_task = result
