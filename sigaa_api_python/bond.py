@@ -44,8 +44,10 @@ class StudentBond:
                             is_course_table = True
                 if not is_course_table:
                     continue
-                tbody = table.find('tbody')
-                rows = tbody.find_all('tr') if tbody else table.find_all('tr')
+                tbody_rows = []
+                for tb in table.find_all('tbody'):
+                    tbody_rows.extend(tb.find_all('tr'))
+                rows = tbody_rows if tbody_rows else table.find_all('tr')
                 for row in rows:
                     if 'periodo' in row.get('class', []):
                         continue
@@ -631,8 +633,8 @@ class StudentBond:
         return response_page
 
     async def confirm_enrollment(self, password, view_state, confirmation_page_html):
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(confirmation_page_html, 'lxml')
+        from .lexsoup import LexSoup
+        soup = LexSoup(confirmation_page_html)
         form = soup.find('form', id=re.compile('form|confirm'))
         if not form:
             form = soup.find('form')

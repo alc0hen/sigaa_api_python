@@ -1,8 +1,20 @@
 import re
-from bs4 import BeautifulSoup
+from .lexsoup import LexSoup
+
+def parse_confirmation_result(html):
+    soup = LexSoup(html)
+    res_body_lower = html.lower()
+    if soup.find('input', type='password') or 'senha incorreta' in res_body_lower or 'senha de confirmação inválida' in res_body_lower or ('inválida' in res_body_lower):
+        error_elements = soup.find_all(class_='erros')
+        if error_elements:
+            msg = '; '.join([err.get_text(strip=True) for err in error_elements])
+        else:
+            msg = 'Senha incorreta ou erro de confirmação no SIGAA.'
+        return (False, msg)
+    return (True, None)
 
 def parse_enrollment_page(html_content):
-    soup = BeautifulSoup(html_content, 'lxml')
+    soup = LexSoup(html_content)
     table = soup.find('table', id='lista-turmas-curriculo')
     if not table:
         table = soup.find('table', class_='listagem')
@@ -11,8 +23,10 @@ def parse_enrollment_page(html_content):
     levels = []
     current_level = None
     current_discipline = None
-    tbody = table.find('tbody')
-    rows = tbody.find_all('tr') if tbody else table.find_all('tr')
+    tbody_rows = []
+    for tb in table.find_all('tbody'):
+        tbody_rows.extend(tb.find_all('tr'))
+    rows = tbody_rows if tbody_rows else table.find_all('tr')
     for row in rows:
         row_classes = row.get('class', [])
         if 'periodo' in row_classes:
@@ -66,7 +80,7 @@ def parse_enrollment_page(html_content):
                 detail_label = labels[1]
                 strong_tag = detail_label.find('strong')
                 description = strong_tag.get_text(strip=True) if strong_tag else ''
-                label_copy = BeautifulSoup(str(detail_label), 'lxml')
+                label_copy = LexSoup(str(detail_label))
                 if label_copy.find('strong'):
                     label_copy.find('strong').decompose()
                 teacher = label_copy.get_text(strip=True).lstrip(' -').strip()

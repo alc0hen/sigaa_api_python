@@ -1,7 +1,7 @@
 import json
 import re
 from urllib.parse import urljoin
-from bs4 import BeautifulSoup
+from .lexsoup import LexSoup
 from .enums import HTTPMethod
 from .exceptions import SigaaSessionExpired
 
@@ -21,7 +21,7 @@ class SigaaPage:
     @property
     def soup(self):
         if self._soup is None:
-            self._soup = BeautifulSoup(self.body, 'lxml')
+            self._soup = LexSoup(self.body)
         return self._soup
 
     @property

@@ -18,6 +18,23 @@ def _same_origin(url, base_origin: tuple) -> bool:
         return False
     return True
 
+def parse_questionnaire_form(page):
+    skip_button = page.soup.find(id='btnNaoResponderContinuarSigaa')
+    if not skip_button:
+        return None
+    form = skip_button.find_parent('form')
+    if not form:
+        return None
+    action = form.get('action')
+    form_id = form.get('id')
+    if not action or not form_id:
+        return None
+    post_values = {form_id: form_id, 'btnNaoResponderContinuarSigaa': 'btnNaoResponderContinuarSigaa'}
+    view_state = page.view_state
+    if view_state:
+        post_values['javax.faces.ViewState'] = view_state
+    return (action, post_values)
+
 class SigaaSession:
 
     def __init__(self, url, cookies=None):
@@ -115,23 +132,13 @@ class SigaaSession:
                 raise SigaaConnectionError(f'Connection error: {e}')
 
     async def _handle_questionnaire(self, page):
-        skip_button = page.soup.find(id='btnNaoResponderContinuarSigaa')
-        if not skip_button:
+        parsed = parse_questionnaire_form(page)
+        if not parsed:
             return
-        form = skip_button.find_parent('form')
-        if not form:
-            return
-        action = form.get('action')
-        form_id = form.get('id')
-        if not action or not form_id:
-            return
+        action, post_values = parsed
         action_url = urljoin(str(page.url), action)
         if not _same_origin(action_url, _origin(self.base_url)):
             return
-        view_state = page.view_state
-        post_values = {form_id: form_id, 'btnNaoResponderContinuarSigaa': 'btnNaoResponderContinuarSigaa'}
-        if view_state:
-            post_values['javax.faces.ViewState'] = view_state
         session = await self._get_session()
         async with session.post(action_url, data=post_values, allow_redirects=False) as resp:
             await resp.text()

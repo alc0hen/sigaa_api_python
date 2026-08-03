@@ -1,6 +1,25 @@
 from urllib.parse import urljoin
 from .exceptions import SigaaInvalidCredentials
 
+def parse_continue_form(page):
+    btn_continuar = page.soup.find('input', attrs={'value': lambda v: v and 'Continuar' in v and ('>>' in v)})
+    if not btn_continuar:
+        return None
+    form = btn_continuar.find_parent('form')
+    if not form or not form.get('action'):
+        return None
+    submit_url = urljoin(str(page.url), form.get('action'))
+    submit_data = {}
+    for input_el in form.find_all('input'):
+        name = input_el.get('name')
+        if name:
+            if input_el.get('type') in ['submit', 'button'] and input_el != btn_continuar:
+                continue
+            submit_data[name] = input_el.get('value', '')
+    if btn_continuar.get('name'):
+        submit_data[btn_continuar.get('name')] = btn_continuar.get('value')
+    return (submit_url, submit_data)
+
 class SigaaLogin:
 
     def __init__(self, session):
@@ -46,23 +65,12 @@ class SigaaLoginImpl(SigaaLogin):
                 page = await self.session.get('/sigaa/verPortalDiscente.do')
                 max_skips -= 1
                 continue
-            btn_continuar = page.soup.find('input', attrs={'value': lambda v: v and 'Continuar' in v and ('>>' in v)})
-            if btn_continuar:
-                form = btn_continuar.find_parent('form')
-                if form and form.get('action'):
-                    submit_url = urljoin(str(page.url), form.get('action'))
-                    submit_data = {}
-                    for input_el in form.find_all('input'):
-                        name = input_el.get('name')
-                        if name:
-                            if input_el.get('type') in ['submit', 'button'] and input_el != btn_continuar:
-                                continue
-                            submit_data[name] = input_el.get('value', '')
-                    if btn_continuar.get('name'):
-                        submit_data[btn_continuar.get('name')] = btn_continuar.get('value')
-                    page = await self.session.post(submit_url, data=submit_data)
-                    max_skips -= 1
-                    continue
+            continue_form = parse_continue_form(page)
+            if continue_form:
+                submit_url, submit_data = continue_form
+                page = await self.session.post(submit_url, data=submit_data)
+                max_skips -= 1
+                continue
             break
         if 'Questionários de Avaliação' in page.soup.text or '/sigaa/questionarios.jsf' in str(page.url):
             from .exceptions import SigaaQuestionnaireError
