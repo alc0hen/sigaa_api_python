@@ -311,7 +311,7 @@ async def _worker_loop():
                     break
 
             if result is None:
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(0.05)
                 continue
 
             _queue_name, raw_task = result
